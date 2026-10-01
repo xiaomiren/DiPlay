@@ -44,8 +44,8 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             @Suppress("DEPRECATION")
-            val peer = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
-            if (peer?.address != device?.address) return
+            val peer = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            if (peer.address != device?.address) return
             when (intent.action) {
                 BluetoothDevice.ACTION_UUID -> {
                     sdpReceived.set(true)
