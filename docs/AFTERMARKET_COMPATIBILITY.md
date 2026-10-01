@@ -45,6 +45,20 @@ On this host, JDK 25 NIO PipeImpl loopback initialization initially failed
 `-Djdk.net.unixdomain.tmpdir=D:/project/DiPlay/.build-tmp` lets Gradle start using a short
 workspace path for temporary sockets. A standalone APK still requires the external authentication
 assets documented in BUILD.md; an identity-free debug APK is not a valid iPhone connection test.
-The subsequent verification ignored repositories injected by the host's global init script,
-then stopped at project configuration because no Android SDK was configured. Compilation and
-unit tests therefore remain unverified; XML/resource-reference checks passed.
+The subsequent local verification ignored repositories injected by the host's global init script,
+then stopped at project configuration because no Android SDK was configured.
+
+## Cloud validation, 1 October 2026
+
+GitHub Actions completed successfully on the fork at commit
+`eae8747eb034cef297f58a901d0921fcee53066c`:
+
+- `:shared:testDebugUnitTest`
+- `:common:testDebugUnitTest`
+- `:mobile:lintDebug`
+- `:mobile:assembleDebug`
+
+[Successful build and artifacts](https://github.com/xiaomiren/DiPlay/actions/runs/36847624417).
+The `diplay-source-only-debug` artifact contains the source-only APK, without runtime
+authentication assets. It is not a standalone iPhone connection test package.
+The real auto_rk_t21 / RK3326 head unit has not yet been tested.
