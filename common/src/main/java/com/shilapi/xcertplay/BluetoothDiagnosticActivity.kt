@@ -15,6 +15,8 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Spinner
+import android.widget.ArrayAdapter
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -30,6 +32,7 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
     private val worker = Executors.newSingleThreadExecutor()
     private lateinit var output: TextView
     private lateinit var start: Button
+    private lateinit var modeSelector: Spinner
     private val report = StringBuilder()
     @Volatile private var socket: BluetoothSocket? = null
     @Volatile private var cancelled = false
@@ -67,7 +70,12 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
         layout.addView(TextView(this).apply {
             text = "蓝牙连接诊断\n先断开 DiPlay 会话，再运行。测试所选手机的服务发现和数据连接，不需要热点。分别测试安全连接与不要求链路认证、加密的连接，只打开通道，不发送数据。每种连接最长等待 45 秒；成功仅代表数据通道可用，不代表 CarPlay 已成功。报告自动保存，并包含在设置中的诊断报告里。"
         })
-        start = Button(this).apply { text = "开始诊断（约 2 分钟）"; setOnClickListener { requestProbe() } }
+        modeSelector = Spinner(this).apply {
+            adapter = ArrayAdapter(this@BluetoothDiagnosticActivity, android.R.layout.simple_spinner_dropdown_item,
+                listOf("两种连接（安全优先）", "仅安全连接", "仅非安全连接（不发送数据）"))
+        }
+        layout.addView(modeSelector)
+        start = Button(this).apply { text = "开始诊断（最长约 2 分钟）"; setOnClickListener { requestProbe() } }
         layout.addView(start)
         layout.addView(Button(this).apply { text = "停止诊断"; setOnClickListener { cancel() } })
         output = TextView(this).apply { setTextIsSelectable(true) }
@@ -106,6 +114,11 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
         sdpReceived.set(false)
         busy = true
         start.isEnabled = false
+        val modes = when (modeSelector.selectedItemPosition) {
+            1 -> listOf(true)
+            2 -> listOf(false)
+            else -> listOf(true, false)
+        }
         worker.execute {
             try {
                 record("Bluetooth transport diagnostic v2; Android=${Build.VERSION.RELEASE}; model=${Build.MODEL}")
@@ -123,7 +136,7 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
                 // Allow the asynchronous SDP broadcast to arrive before socket probing.
                 repeat(12) { if (cancelled) return@execute; Thread.sleep(1000) }
                 record("SDP response within 12 seconds=${sdpReceived.get()}")
-                for (secure in listOf(true, false)) {
+                for (secure in modes) {
                     if (cancelled) break
                     if (!probe(peer, secure)) break
                 }
