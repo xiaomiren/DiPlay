@@ -6,6 +6,7 @@ plugins {
 // Optional local-only input. CI and ordinary source builds contain no accessory identity.
 val localAuthenticationAssets = providers.environmentVariable("DIPLAY_AUTH_ASSETS_DIR")
     .orNull?.let { file(it).canonicalFile }
+val rkCarTest = providers.gradleProperty("diplayCarTest").map(String::toBoolean).getOrElse(false)
 
 android {
     namespace = "com.shilapi.xcertplay"
@@ -19,6 +20,7 @@ android {
         targetSdk = 37
         versionCode = 27
         versionName = "0.2.8"
+        manifestPlaceholders["diplayLabel"] = if (rkCarTest) "DiPlay RK3326 测试版" else "@string/app_name"
 
     }
 
@@ -39,8 +41,8 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".hudtest"
-            versionNameSuffix = "-hud-test"
+            applicationIdSuffix = if (rkCarTest) ".rk3326test" else ".hudtest"
+            versionNameSuffix = if (rkCarTest) "-rk3326-car-test" else "-hud-test"
         }
         release {
             optimization {

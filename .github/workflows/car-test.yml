@@ -1,0 +1,90 @@
+name: RK3326 connection test APK
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check public source
+        run: python3 scripts/check_public_tree.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-37.0 build-tools;36.0.0 ndk;28.2.13676358
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Restore runtime assets from the verified public upstream APK
+        env:
+          UPSTREAM_APK: https://github.com/shihabal3amri/DiPlay/releases/download/v0.2.8/DiPlay-0.2.8.apk
+          UPSTREAM_SHA256: 9b36a0866608244e422053d6027706b4672d8f2f4a8be9eb7e612411ffb6bf48
+        run: |
+          python3 - <<'PY'
+          import hashlib, io, os, pathlib, urllib.request, zipfile
+          req = urllib.request.Request(os.environ['UPSTREAM_APK'], headers={'User-Agent': 'DiPlay-car-test'})
+          with urllib.request.urlopen(req, timeout=120) as response:
+              apk = response.read()
+          assert hashlib.sha256(apk).hexdigest() == os.environ['UPSTREAM_SHA256'], 'Upstream APK digest mismatch'
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'diplay-runtime'
+          target = root / 'offline-mfi'
+          target.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(io.BytesIO(apk)) as archive:
+              for name in ('identity.pk8', 'certificate.p7b'):
+                  data = archive.read('assets/offline-mfi/' + name)
+                  assert data, 'Empty runtime asset'
+                  path = target / name
+                  path.write_bytes(data)
+                  path.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('DIPLAY_AUTH_ASSETS_DIR=' + str(root) + '\n')
+          print('Verified public upstream APK; restored its two existing runtime assets in the ephemeral cloud runner.')
+          PY
+      - name: Build and lint standalone connection test APK
+        run: ./gradlew -PdiplayCarTest=true :mobile:lintDebug :mobile:assembleStandaloneDebug --stacktrace
+      - name: Verify packaged runtime assets and prepare download
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, pathlib, shutil, zipfile
+          apks = list(pathlib.Path('mobile/build/outputs/apk/debug').glob('*.apk'))
+          assert len(apks) == 1, 'Expected one test APK'
+          with zipfile.ZipFile(apks[0]) as archive:
+              for name in ('identity.pk8', 'certificate.p7b'):
+                  assert archive.read('assets/offline-mfi/' + name) == (pathlib.Path(os.environ['DIPLAY_AUTH_ASSETS_DIR']) / 'offline-mfi' / name).read_bytes(), 'Packaged runtime asset mismatch'
+          output = pathlib.Path('car-test-output')
+          output.mkdir(exist_ok=True)
+          target = output / 'DiPlay-RK3326-car-test.apk'
+          shutil.copyfile(apks[0], target)
+          (output / 'SHA256SUMS.txt').write_text(hashlib.sha256(target.read_bytes()).hexdigest() + '  ' + target.name + '\n')
+          print('Packaged runtime assets verified; test APK prepared.')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diplay-rk3326-connection-test
+          path: car-test-output/
+          if-no-files-found: error
+          retention-days: 7
+  download:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: diplay-rk3326-connection-test
+          path: car-test-output
+      - name: Publish clearly marked connection-test download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          tag="rk3326-car-test-${GITHUB_RUN_ID}"
+          gh release create "$tag" car-test-output/DiPlay-RK3326-car-test.apk car-test-output/SHA256SUMS.txt \
+            --target "$BUILD_SHA" --prerelease --title "RK3326 connection test · ${GITHUB_RUN_ID}" \
+            --notes "Connection test build with runtime assets restored from the SHA-256-verified public upstream DiPlay 0.2.8 APK. Contains the same experimental accessory identity as upstream; no new user authentication step. Installs separately as com.shihab.diplay.rk3326test, labelled DiPlay RK3326 测试版. Unit tests passed on the preceding source build; this package is linted and its packaged runtime files verified. Actual RK3326/iPhone connectivity remains unverified."
