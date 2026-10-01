@@ -40,7 +40,7 @@ internal class AppCleanupDialog(private val activity: Activity) {
             info.flags and ApplicationInfo.FLAG_PERSISTENT != 0 ||
             name == "com.android.settings" || name == activity.packageName ||
             name == activity.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)?.activityInfo?.packageName ||
-            activity.getSystemService(InputMethodManager::class.java).inputMethodList.any { it.packageName == name }
+            activity.getSystemService(InputMethodManager::class.java)?.inputMethodList?.any { it.packageName == name } == true
         val options = mutableListOf(text(R.string.cleanup_details))
         if (disabledByUs) options.add(text(R.string.cleanup_restore))
         else if (!isProtected) options.add(text(R.string.cleanup_disable))
