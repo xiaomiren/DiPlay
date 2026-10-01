@@ -250,6 +250,9 @@ class DiPlayActivity : ComponentActivity() {
             card.addView(button(getString(R.string.cleanup_title), false) { AppCleanupDialog(this).show() }, matchButton(12, 60))
         }
         section(content, getString(R.string.diagnostics), R.drawable.ic_dp_diagnostics) { card ->
+            card.addView(button("蓝牙连接诊断", false) {
+                startActivity(Intent(this, BluetoothDiagnosticActivity::class.java))
+            }, matchButton(10, 60))
             exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), false) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) exportDiagnostics()
                 else chooseReportDestination()
@@ -1035,7 +1038,7 @@ class DiPlayActivity : ComponentActivity() {
                     appendLine("--- Last display negotiation (timestamps distinguish it from current settings) ---")
                     appendLine(DisplayDiagnosticSnapshot.report(appContext))
                     appendLine()
-                    for (name in SessionLogFile.REPORT_NAMES) {
+                    for (name in SessionLogFile.REPORT_NAMES + listOf("bluetooth-diagnostic.log")) {
                         val file = File(appContext.filesDir, "logs/$name")
                         if (file.isFile) {
                             appendLine("--- $name ---")
