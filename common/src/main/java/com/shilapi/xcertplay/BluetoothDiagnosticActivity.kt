@@ -28,7 +28,6 @@ import java.util.concurrent.TimeUnit
 class BluetoothDiagnosticActivity : ComponentActivity() {
     private val service = UUID.fromString("00000000-deca-fade-deca-deafdecacafe")
     private val worker = Executors.newSingleThreadExecutor()
-    private val timer = Executors.newSingleThreadScheduledExecutor()
     private lateinit var output: TextView
     private lateinit var start: Button
     private val report = StringBuilder()
@@ -142,6 +141,7 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
         val stage = java.util.concurrent.atomic.AtomicReference("socket-create")
         val outcome = java.util.concurrent.atomic.AtomicReference("no result")
         val finished = java.util.concurrent.CountDownLatch(1)
+        val abandoned = java.util.concurrent.atomic.AtomicBoolean(false)
         if (!transportBusy.compareAndSet(false, true)) return false
         val began = android.os.SystemClock.elapsedRealtime()
         record("RFCOMM $mode stage=socket-create starting; overall deadline=45000ms")
@@ -152,7 +152,7 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
                     else peer.createInsecureRfcommSocketToServiceRecord(service)
                 socket = current
                 stage.set("socket-connect")
-                if (!cancelled) {
+                if (!cancelled && !abandoned.get()) {
                     current.connect()
                     outcome.set("connected; no protocol data sent")
                 } else outcome.set("cancelled before connect")
@@ -170,6 +170,7 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
         while (!finished.await(250, TimeUnit.MILLISECONDS)) {
             val elapsed = android.os.SystemClock.elapsedRealtime() - began
             if (cancelled || elapsed >= 45000) {
+                abandoned.set(true)
                 record("RFCOMM $mode ${if (cancelled) "cancelled" else "timed out"}; blockedStage=${stage.get()}; elapsedMs=$elapsed; lastResult=${outcome.get()}")
                 closeAsync(socket)
                 record("系统蓝牙调用未返回，已停止后续测试；诊断界面可退出。不能据此判定硬件不支持。")
@@ -220,7 +221,6 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
         cancelled = true
         closeAsync(socket)
         worker.shutdownNow()
-        timer.shutdownNow()
         if (registered) unregisterReceiver(receiver)
         super.onDestroy()
     }
