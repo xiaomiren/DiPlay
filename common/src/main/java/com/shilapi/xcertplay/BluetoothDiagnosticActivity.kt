@@ -88,6 +88,10 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
 
     private fun requestProbe() {
         if (busy) return
+        if (transportBusy.get()) {
+            record("上次蓝牙系统调用仍未返回，请重启测试 App 后再试，避免叠加连接。")
+            return
+        }
         if (CarPlayBackgroundSession.hasSession()) {
             record("请先在 DiPlay 主页面断开当前会话，避免两个连接互相干扰。")
             return
@@ -105,7 +109,7 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
         start.isEnabled = false
         worker.execute {
             try {
-                record("Bluetooth transport diagnostic v1; Android=${Build.VERSION.RELEASE}; model=${Build.MODEL}")
+                record("Bluetooth transport diagnostic v2; Android=${Build.VERSION.RELEASE}; model=${Build.MODEL}")
                 val adapter = getSystemService(BluetoothManager::class.java)?.adapter ?: error("Android Bluetooth adapter absent")
                 record("Adapter enabled=${adapter.isEnabled}; state=${adapter.state}; discovering=${adapter.isDiscovering}")
                 check(adapter.isEnabled) { "Enable Bluetooth first" }
@@ -122,25 +126,7 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
                 record("SDP response within 12 seconds=${sdpReceived.get()}")
                 for (secure in listOf(true, false)) {
                     if (cancelled) break
-                    val mode = if (secure) "secure" else "insecure"
-                    record("RFCOMM $mode starting; timeout=45000ms; insecure probe does not request link authentication/encryption")
-                    val current = if (secure) peer.createRfcommSocketToServiceRecord(service)
-                        else peer.createInsecureRfcommSocketToServiceRecord(service)
-                    socket = current
-                    if (cancelled) { current.close(); break }
-                    val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
-                    val deadline = timer.schedule({ timedOut.set(true); runCatching { current.close() } }, 45, TimeUnit.SECONDS)
-                    val began = android.os.SystemClock.elapsedRealtime()
-                    try {
-                        current.connect()
-                        record("RFCOMM $mode connected; elapsedMs=${android.os.SystemClock.elapsedRealtime() - began}; no protocol data sent")
-                    } catch (error: Exception) {
-                        record("RFCOMM $mode failed; elapsedMs=${android.os.SystemClock.elapsedRealtime() - began}; timedOut=${timedOut.get()}; cancelled=$cancelled; ${error.javaClass.simpleName}: ${error.message}")
-                    } finally {
-                        deadline.cancel(false)
-                        runCatching { current.close() }
-                        socket = null
-                    }
+                    if (!probe(peer, secure)) break
                 }
                 record("Diagnostic complete; missing SDP response is inconclusive; socket success does not verify iAP2 authentication")
             } catch (error: Exception) {
@@ -149,6 +135,59 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
                 runOnUiThread { busy = false; start.isEnabled = true }
             }
         }
+    }
+
+    private fun probe(peer: BluetoothDevice, secure: Boolean): Boolean {
+        val mode = if (secure) "secure" else "insecure"
+        val stage = java.util.concurrent.atomic.AtomicReference("socket-create")
+        val outcome = java.util.concurrent.atomic.AtomicReference("no result")
+        val finished = java.util.concurrent.CountDownLatch(1)
+        if (!transportBusy.compareAndSet(false, true)) return false
+        val began = android.os.SystemClock.elapsedRealtime()
+        record("RFCOMM $mode stage=socket-create starting; overall deadline=45000ms")
+        Thread({
+            var current: BluetoothSocket? = null
+            try {
+                current = if (secure) peer.createRfcommSocketToServiceRecord(service)
+                    else peer.createInsecureRfcommSocketToServiceRecord(service)
+                socket = current
+                stage.set("socket-connect")
+                if (!cancelled) {
+                    current.connect()
+                    outcome.set("connected; no protocol data sent")
+                } else outcome.set("cancelled before connect")
+            } catch (error: Exception) {
+                outcome.set("failed at ${stage.get()}; ${error.javaClass.simpleName}: ${error.message}")
+            } finally {
+                stage.set("socket-close")
+                runCatching { current?.close() }
+                socket = null
+                transportBusy.set(false)
+                finished.countDown()
+            }
+        }, "bluetooth-diagnostic-$mode").apply { isDaemon = true; start() }
+        var nextProgress = 5000L
+        while (!finished.await(250, TimeUnit.MILLISECONDS)) {
+            val elapsed = android.os.SystemClock.elapsedRealtime() - began
+            if (cancelled || elapsed >= 45000) {
+                record("RFCOMM $mode ${if (cancelled) "cancelled" else "timed out"}; blockedStage=${stage.get()}; elapsedMs=$elapsed; lastResult=${outcome.get()}")
+                closeAsync(socket)
+                record("系统蓝牙调用未返回，已停止后续测试；诊断界面可退出。不能据此判定硬件不支持。")
+                return false
+            }
+            if (elapsed >= nextProgress) {
+                record("RFCOMM $mode waiting; stage=${stage.get()}; elapsedMs=$elapsed")
+                nextProgress += 5000
+            }
+        }
+        record("RFCOMM $mode ${outcome.get()}; elapsedMs=${android.os.SystemClock.elapsedRealtime() - began}")
+        return true
+    }
+
+    private fun closeAsync(current: BluetoothSocket?) {
+        if (current == null) return
+        Thread({ runCatching { current.close() } }, "bluetooth-diagnostic-close")
+            .apply { isDaemon = true; start() }
     }
 
     private fun category(uuid: UUID): String = when (uuid) {
@@ -173,16 +212,21 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
 
     private fun cancel() {
         cancelled = true
-        runCatching { socket?.close() }
+        closeAsync(socket)
         record("Diagnostic cancellation requested")
     }
 
     override fun onDestroy() {
         cancelled = true
-        runCatching { socket?.close() }
+        closeAsync(socket)
         worker.shutdownNow()
         timer.shutdownNow()
         if (registered) unregisterReceiver(receiver)
         super.onDestroy()
+    }
+
+    companion object {
+        // Do not start another native operation while a vendor call remains stuck.
+        private val transportBusy = java.util.concurrent.atomic.AtomicBoolean(false)
     }
 }
