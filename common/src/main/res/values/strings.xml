@@ -456,4 +456,18 @@
     <string name="video_play">Play</string>
     <string name="video_pause">Pause</string>
     <string name="video_cannot_play">This video can\'t play on the car screen. Protected video, such as Apple TV+, needs a licensed receiver.</string>
+    <string name="cleanup_title">App cleanup</string>
+    <string name="cleanup_description">Manage apps with launcher icons. Ordinary apps can be uninstalled through Android. Disabling preinstalled apps requires approved local network ADB and can affect vehicle functions. Choose only apps you recognize. Disabling does not delete system files or free their storage. Apps disabled here can be restored here; keep DiPlay installed until restored. Use while parked.</string>
+    <string name="cleanup_details">App details / storage</string>
+    <string name="cleanup_disable">Disable for current user · ADB</string>
+    <string name="cleanup_restore">Restore default state · ADB</string>
+    <string name="cleanup_uninstall">Uninstall · Android confirmation</string>
+    <string name="cleanup_confirm">Selected package: %1$s\n\nThis changes its availability for the current Android user and may affect vehicle functions. Only continue if you know this app. No system files will be deleted. Local ADB authorization may appear.</string>
+    <string name="cleanup_working">Applying app state…</string>
+    <string name="cleanup_failed">App operation failed</string>
+    <string name="cleanup_adb_required">Enable the head unit’s local network ADB on port 5555 and approve DiPlay. Android wireless-debugging pairing is not supported. Ordinary app details and uninstall remain available.</string>
+    <string name="wireless_compatibility">Wireless compatibility</string>
+    <string name="wireless_compatibility_help">If Android hides the Bluetooth controller address, enter the actual head-unit Android Bluetooth MAC shown by its manufacturer or diagnostics. Do not enter the iPhone address, Wi-Fi address, or a guessed address. An MCU Bluetooth module may be separate from Android Bluetooth and cannot be bridged by this setting. Leave blank for automatic detection. Disconnect and reconnect after saving.</string>
+    <string name="wireless_bt_invalid">Enter a valid controller MAC address; placeholder, zero and multicast addresses are not accepted.</string>
+    <string name="wireless_compatibility_saved">Saved. Disconnect and reconnect CarPlay to apply.</string>
 </resources>

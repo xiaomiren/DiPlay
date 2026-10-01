@@ -243,6 +243,11 @@ class DiPlayActivity : ComponentActivity() {
         section(content, getString(R.string.connection_setup), R.drawable.ic_dp_connection) { card ->
             card.addView(label(getString(R.string.choose_how_to_connect_follow_the_setup_steps_and_save_your), 16, MUTED))
             card.addView(button(getString(R.string.open_connection_setup), false) { page = "connection"; render() }, matchButton(12, 60))
+            card.addView(button(getString(R.string.wireless_compatibility), false) { showWirelessCompatibility() }, matchButton(12, 60))
+        }
+        section(content, getString(R.string.cleanup_title)) { card ->
+            card.addView(label(getString(R.string.cleanup_description), 16, MUTED))
+            card.addView(button(getString(R.string.cleanup_title), false) { AppCleanupDialog(this).show() }, matchButton(12, 60))
         }
         section(content, getString(R.string.diagnostics), R.drawable.ic_dp_diagnostics) { card ->
             exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), false) {
@@ -960,6 +965,33 @@ class DiPlayActivity : ComponentActivity() {
         }
         connectButton?.isEnabled = setupError == null
     }
+    private fun showWirelessCompatibility() {
+        val identity = com.shilapi.xcertplay.orchestration.WirelessBluetoothIdentity
+        val body = column().apply { setPadding(dp(20), dp(12), dp(20), dp(12)) }
+        body.addView(label(getString(R.string.wireless_compatibility_help), 16, TEXT))
+        val address = EditText(this).apply {
+            hint = "AA:BB:CC:DD:EE:FF"
+            setSingleLine()
+            setText(identity.loadOverride(this@DiPlayActivity).orEmpty())
+        }
+        body.addView(address)
+        val dialog = AlertDialog.Builder(this).setTitle(R.string.wireless_compatibility).setView(body)
+            .setNegativeButton(android.R.string.cancel, null).setPositiveButton(R.string.done, null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val value = address.text.toString().trim()
+                if (value.isNotBlank() && identity.normalize(value) == null) {
+                    address.error = getString(R.string.wireless_bt_invalid)
+                } else {
+                    identity.save(this, value)
+                    toast(getString(R.string.wireless_compatibility_saved))
+                    dialog.dismiss()
+                }
+            }
+        }
+        dialog.show()
+    }
+
     private fun reportFileName() = "DiPlay-${SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date())}.txt"
 
     private fun chooseReportDestination() {
@@ -992,6 +1024,13 @@ class DiPlayActivity : ComponentActivity() {
                     appendLine("Saved resolution preference (may differ from active session): ${AirPlayPersistence.loadDisplayScaleTenths(appContext) * 10}%")
                     appendLine("Session: ${if (CarPlayBackgroundSession.active) "active" else if (CarPlayBackgroundSession.hasSession()) "connecting" else "stopped"}")
                     appendLine("Head-unit board: ${Build.BOARD}; hardware: ${Build.HARDWARE}; build: ${Build.DISPLAY}")
+                    appendLine("BYD navigation services available: ${BydOutputSettings.available(appContext)}")
+                    appendLine("Bluetooth identity override: ${com.shilapi.xcertplay.orchestration.WirelessBluetoothIdentity.loadOverride(appContext) != null}")
+                    val bluetooth = appContext.getSystemService(BluetoothManager::class.java)?.adapter
+                    appendLine("Android Bluetooth adapter available: ${bluetooth != null}")
+                    appendLine("Android Bluetooth enabled: ${runCatching { bluetooth?.isEnabled }.getOrNull()}")
+                    appendLine("Android bonded device count: ${runCatching { bluetooth?.bondedDevices?.size }.getOrNull()}")
+                    appendLine("Selected iPhone visible in Android bond list: ${runCatching { bluetooth?.bondedDevices?.any { it.address.equals(DiPlayPreferences.phoneAddress(appContext), ignoreCase = true) } }.getOrNull()}")
                     appendLine()
                     appendLine("--- Last display negotiation (timestamps distinguish it from current settings) ---")
                     appendLine(DisplayDiagnosticSnapshot.report(appContext))

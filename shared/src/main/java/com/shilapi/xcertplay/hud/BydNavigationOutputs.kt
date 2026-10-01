@@ -42,6 +42,7 @@ object BydNavigationOutputs {
 
     fun start(context: Context) {
         val app = context.applicationContext
+        if (!BydOutputSettings.available(app)) return
         useStandalone = BydStandaloneHudOutput.available(app)
         if (useStandalone) standalone.start { BydStandaloneNavigationBridge.initialize(app) }
         else {

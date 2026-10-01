@@ -1742,6 +1742,8 @@ class CarPlayController(
     }
 
     private fun connectBluetoothSocket(socket: BluetoothSocket, address: String) {
+        runCatching { appContext.getSystemService(BluetoothManager::class.java)?.adapter?.cancelDiscovery() }
+            .onFailure { debugLog("wireless Bluetooth discovery cancellation unavailable: ${it.javaClass.simpleName}") }
         val result = AtomicReference<Throwable?>()
         val connected = CountDownLatch(1)
         Thread(
@@ -1858,6 +1860,10 @@ class CarPlayController(
 
     @Suppress("DEPRECATION")
     private fun accessoryBluetoothMac(adapter: BluetoothAdapter): String {
+        WirelessBluetoothIdentity.loadOverride(appContext)?.let {
+            debugLog("wireless local Bluetooth identity source=manual")
+            return it
+        }
         val address = try {
             adapter.address
         } catch (_: SecurityException) {
@@ -1869,11 +1875,11 @@ class CarPlayController(
             null
         }
         return listOfNotNull(address, settingsAddress)
-            .firstOrNull {
-                BLUETOOTH_ADDRESS.matches(it) &&
-                    !it.equals(ADAPTER_ADDRESS_PLACEHOLDER, ignoreCase = true)
+            .firstNotNullOfOrNull { WirelessBluetoothIdentity.normalize(it) }
+            ?.also { debugLog("wireless local Bluetooth identity source=Android") }
+            ?: airPlayConfig.btMac.also {
+                debugLog("wireless local Bluetooth identity source=config-fallback; actual controller address unavailable; verify wireless compatibility settings")
             }
-            ?: airPlayConfig.btMac
     }
 
     private fun hostAddressText(address: InetAddress): String {
@@ -2109,7 +2115,5 @@ class CarPlayController(
         private const val RFCOMM_CONNECT_TIMEOUT_MILLIS = 15_000L
         private const val MAXIMUM_REENUMERATION_ATTEMPTS = 2
         private const val EXECUTOR_CLOSE_TIMEOUT_MILLIS = 2_000L
-        private const val ADAPTER_ADDRESS_PLACEHOLDER = "02:00:00:00:00:00"
-        private val BLUETOOTH_ADDRESS = Regex("^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$")
     }
 }

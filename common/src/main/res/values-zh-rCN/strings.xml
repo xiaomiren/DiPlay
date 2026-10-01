@@ -456,4 +456,18 @@
     <string name="video_play">播放</string>
     <string name="video_pause">暂停</string>
     <string name="video_cannot_play">此视频无法在车机屏幕上播放。受保护的视频（例如 Apple TV+）需要获得授权的接收器。</string>
+    <string name="cleanup_title">应用清理</string>
+    <string name="cleanup_description">管理有桌面图标的应用。普通应用通过系统确认卸载；预装应用停用需要授权本机网络 ADB，可能影响车机功能，请仅选择你了解的应用。停用不删除系统文件，也不会释放它们占用的空间。在这里停用的应用可以在这里恢复，恢复前请保留 DiPlay。请停车后操作。</string>
+    <string name="cleanup_details">应用详情／存储</string>
+    <string name="cleanup_disable">为当前用户停用 · ADB</string>
+    <string name="cleanup_restore">恢复默认状态 · ADB</string>
+    <string name="cleanup_uninstall">卸载 · 系统确认</string>
+    <string name="cleanup_confirm">所选包名：%1$s\n\n这会改变该应用对当前 Android 用户的可用状态，可能影响车机功能。请确认你了解该应用再继续。不删除系统文件。车机可能弹出 ADB 授权提示。</string>
+    <string name="cleanup_working">正在修改应用状态…</string>
+    <string name="cleanup_failed">应用操作失败</string>
+    <string name="cleanup_adb_required">需要开启车机本机 5555 端口的网络 ADB，并授权 DiPlay。目前不支持 Android 无线调试配对。仍可使用普通应用详情和卸载入口。</string>
+    <string name="wireless_compatibility">无线连接兼容设置</string>
+    <string name="wireless_compatibility_help">如果 Android 隐藏了蓝牙控制器地址，可填写厂商或诊断确认的车机 Android 蓝牙 MAC。不要填写 iPhone 地址、Wi-Fi 地址或编造的地址。MCU 蓝牙模块可能独立于 Android 蓝牙，本设置无法桥接两者。留空使用自动检测。保存后请断开并重新连接。</string>
+    <string name="wireless_bt_invalid">请输入有效的控制器 MAC 地址；不接受占位、全零或组播地址。</string>
+    <string name="wireless_compatibility_saved">已保存，请断开并重新连接 CarPlay 后生效。</string>
 </resources>

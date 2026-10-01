@@ -48,11 +48,33 @@ class Iap2WirelessControlClient(
         if (identified.vehicleStatusEnabled != identification.vehicleStatusEnabled) {
             onProgress("iap2 no battery reading: not declaring an electric vehicle")
         }
-        Iap2IdentificationClient(session).identify(identified, requireRemaining(deadlineNanos))
+        onProgress("iap2 stage=link-negotiation waiting")
+        try {
+            if (!session.awaitReady(requireRemaining(deadlineNanos))) {
+                throw IphoneUsbException.TimedOut("Wireless iAP2 link negotiation timed out or closed")
+            }
+            onProgress("iap2 stage=link-negotiation ready")
+        } catch (error: Exception) {
+            onProgress("iap2 stage=link-negotiation failed type=${error.javaClass.simpleName}")
+            throw error
+        }
+        onProgress("iap2 stage=identification starting")
+        try {
+            Iap2IdentificationClient(session).identify(identified, requireRemaining(deadlineNanos))
+        } catch (error: Exception) {
+            onProgress("iap2 stage=identification failed type=${error.javaClass.simpleName}")
+            throw error
+        }
         onProgress("iap2 identification accepted")
         var stage = Iap2WirelessControlStage.IDENTIFIED
 
-        mfi.run(session, requireRemaining(deadlineNanos), onProgress)
+        onProgress("iap2 stage=authentication starting")
+        try {
+            mfi.run(session, requireRemaining(deadlineNanos), onProgress)
+        } catch (error: Exception) {
+            onProgress("iap2 stage=authentication failed type=${error.javaClass.simpleName}")
+            throw error
+        }
         stage = Iap2WirelessControlStage.AUTHENTICATED
         onProgress("iap2 authentication accepted")
 
