@@ -2115,5 +2115,6 @@ class CarPlayController(
         private const val RFCOMM_CONNECT_TIMEOUT_MILLIS = 15_000L
         private const val MAXIMUM_REENUMERATION_ATTEMPTS = 2
         private const val EXECUTOR_CLOSE_TIMEOUT_MILLIS = 2_000L
+        private const val ADAPTER_ADDRESS_PLACEHOLDER = "02:00:00:00:00:00"
     }
 }
