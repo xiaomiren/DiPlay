@@ -62,3 +62,21 @@ GitHub Actions completed successfully on the fork at commit
 The `diplay-source-only-debug` artifact contains the source-only APK, without runtime
 authentication assets. It is not a standalone iPhone connection test package.
 The real auto_rk_t21 / RK3326 head unit has not yet been tested.
+
+## Connection-test packaging correction
+
+The source-only package fails the unchanged upstream bootstrap on a fresh installation,
+which deliberately disables Connect phone when its runtime files cannot be loaded.
+That is a packaging failure before RFCOMM/iAP2, not evidence of a head-unit handshake failure.
+
+The separately dispatched `car-test.yml` cloud workflow restores the two existing runtime
+files from the public official `DiPlay-0.2.8.apk`, after checking its upstream SHA-256
+`9b36a0866608244e422053d6027706b4672d8f2f4a8be9eb7e612411ffb6bf48`.
+It uses `assembleStandaloneDebug`, verifies the output contains identical runtime files,
+and publishes a clearly marked test download. Runtime files remain outside the tracked source.
+This reuses the upstream experimental identity; it does not introduce a user authentication step.
+
+`-PdiplayCarTest=true` gives this package the separate ID
+`com.shihab.diplay.rk3326test` and label `DiPlay RK3326 测试版`.
+The official app and preceding `.hudtest` source package can remain installed.
+Configure connection settings in the new test app and run only one projection app at a time.
