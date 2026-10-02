@@ -29,7 +29,10 @@ class BluetoothProbeService : Service() {
             var socket: BluetoothSocket? = null
             var result = "no result"
             try {
-                val peer = getSystemService(BluetoothManager::class.java).adapter.getRemoteDevice(address)
+                val manager = getSystemService(BluetoothManager::class.java)
+                    ?: error("Android Bluetooth manager absent")
+                val adapter = manager.adapter ?: error("Android Bluetooth adapter absent")
+                val peer = adapter.getRemoteDevice(address)
                 send(1, "socket-create")
                 val uuid = UUID.fromString("00000000-deca-fade-deca-deafdecacafe")
                 val created = if (secure) peer.createRfcommSocketToServiceRecord(uuid)

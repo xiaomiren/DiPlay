@@ -45,7 +45,7 @@ jobs:
           print('Verified public upstream APK; restored its two existing runtime assets in the ephemeral cloud runner.')
           PY
       - name: Build and lint standalone connection test APK
-        run: ./gradlew -PdiplayCarTest=true :mobile:lintDebug :mobile:assembleStandaloneDebug --stacktrace
+        run: ./gradlew -PdiplayCarTest=true :common:testDebugUnitTest :mobile:lintDebug :mobile:assembleStandaloneDebug --stacktrace
       - name: Verify packaged runtime assets and prepare download
         run: |
           python3 - <<'PY'

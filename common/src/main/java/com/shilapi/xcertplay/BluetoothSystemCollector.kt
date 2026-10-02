@@ -22,6 +22,7 @@ internal class BluetoothSystemCollector(private val context: Context, private va
 
     fun snapshot(label: String, since: String) {
         emit("--- System evidence $label ---")
+        emit("Evidence scope=Bluetooth logcat and dumpsys; HCI packet capture is not enabled or collected by this App")
         if (access == LocalAdb.Access.READY) {
             bounded("Bluetooth system state", 12) {
                 show(adb?.shell("timeout 8 dumpsys bluetooth_manager"), false)
@@ -44,7 +45,8 @@ internal class BluetoothSystemCollector(private val context: Context, private va
     private fun show(text: String?, log: Boolean) {
         if (text == null) { emit("Evidence command failed or timed out; no usable output"); return }
         val relevant = Regex("(?i)bluetooth|bt_stack|btif|bta_|rfcomm|sdp|l2cap|hci|avrcp|a2dp|permission denial|permission denied|not found|timed out")
-        val values = text.lineSequence().filter { relevant.containsMatchIn(it) }.take(180).toList()
+        val privateData = Regex("(?i)link.?key|\\bltk\\b|\\birk\\b|pin.?code|packet|payload|eir.?data")
+        val values = text.lineSequence().filter { relevant.containsMatchIn(it) && !privateData.containsMatchIn(it) }.take(180).toList()
         emit("Filtered ${if (log) "logcat" else "dumpsys"} lines=${values.size}; absence of lines is inconclusive")
         values.forEach { emit(it) }
     }
