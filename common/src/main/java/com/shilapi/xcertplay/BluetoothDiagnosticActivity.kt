@@ -17,6 +17,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Spinner
 import android.widget.ArrayAdapter
+import android.widget.CheckBox
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -33,13 +34,15 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
     private lateinit var output: TextView
     private lateinit var start: Button
     private lateinit var modeSelector: Spinner
+    private lateinit var adbApproval: CheckBox
     private val report = StringBuilder()
-    @Volatile private var socket: BluetoothSocket? = null
+    @Volatile private var probePid = 0
     @Volatile private var cancelled = false
     private var device: BluetoothDevice? = null
     private var registered = false
     private var busy = false
     private val sdpReceived = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val knownNames = java.util.concurrent.CopyOnWriteArrayList<String>()
     private val permissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         if (result.values.all { it }) begin() else record("Required Bluetooth permissions denied")
     }
@@ -68,16 +71,19 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 24, 24, 24) }
         layout.addView(TextView(this).apply {
-            text = "蓝牙连接诊断\n先断开 DiPlay 会话，再运行。测试所选手机的服务发现和数据连接，不需要热点。分别测试安全连接与不要求链路认证、加密的连接，只打开通道，不发送数据。每种连接最长等待 45 秒；成功仅代表数据通道可用，不代表 CarPlay 已成功。报告自动保存，并包含在设置中的诊断报告里。"
+            text = "完整蓝牙诊断\n一次采集权限、蓝牙状态、服务发现、两种连接及前后系统日志。每种连接最多 45 秒，只打开通道，不发送数据；超时后自动释放独立诊断进程。无需热点。系统日志需要已授权的本机 ADB；不可用时会明确注明。完成后在本页保存完整报告。"
         })
         modeSelector = Spinner(this).apply {
             adapter = ArrayAdapter(this@BluetoothDiagnosticActivity, android.R.layout.simple_spinner_dropdown_item,
                 listOf("两种连接（安全优先）", "仅安全连接", "仅非安全连接（不发送数据）"))
         }
         layout.addView(modeSelector)
-        start = Button(this).apply { text = "开始诊断（最长约 2 分钟）"; setOnClickListener { requestProbe() } }
+        adbApproval = CheckBox(this).apply { text = "尝试请求本机 ADB 授权（需开启网络 ADB 5555；可跳过）" }
+        layout.addView(adbApproval)
+        start = Button(this).apply { text = "一键完整诊断（约 2–4 分钟）"; setOnClickListener { requestProbe() } }
         layout.addView(start)
         layout.addView(Button(this).apply { text = "停止诊断"; setOnClickListener { cancel() } })
+        layout.addView(Button(this).apply { text = "保存完整诊断报告"; setOnClickListener { saveReport() } })
         output = TextView(this).apply { setTextIsSelectable(true) }
         layout.addView(ScrollView(this).apply { addView(output) }, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(layout)
@@ -95,10 +101,6 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
 
     private fun requestProbe() {
         if (busy) return
-        if (transportBusy.get()) {
-            record("上次蓝牙系统调用仍未返回，请重启测试 App 后再试，避免叠加连接。")
-            return
-        }
         if (CarPlayBackgroundSession.hasSession()) {
             record("请先在 DiPlay 主页面断开当前会话，避免两个连接互相干扰。")
             return
@@ -114,20 +116,32 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
         sdpReceived.set(false)
         busy = true
         start.isEnabled = false
+        val allowAdbApproval = adbApproval.isChecked
         val modes = when (modeSelector.selectedItemPosition) {
             1 -> listOf(true)
             2 -> listOf(false)
             else -> listOf(true, false)
         }
         worker.execute {
+            val since = java.text.SimpleDateFormat("MM-dd HH:mm:ss.SSS", java.util.Locale.ROOT).format(java.util.Date())
+            val collector = BluetoothSystemCollector(applicationContext, ::record)
             try {
-                record("Bluetooth transport diagnostic v2; Android=${Build.VERSION.RELEASE}; model=${Build.MODEL}")
+                record("Bluetooth transport diagnostic v3; Android=${Build.VERSION.RELEASE}; model=${Build.MODEL}")
+                record("Board=${Build.BOARD}; hardware=${Build.HARDWARE}; build=${Build.DISPLAY}")
+                record("Permissions connect=${androidx.core.content.ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT)} scan=${androidx.core.content.ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN)}; pre-Android12 uses legacy permissions")
                 val adapter = getSystemService(BluetoothManager::class.java)?.adapter ?: error("Android Bluetooth adapter absent")
                 record("Adapter enabled=${adapter.isEnabled}; state=${adapter.state}; discovering=${adapter.isDiscovering}")
                 check(adapter.isEnabled) { "Enable Bluetooth first" }
                 val address = DiPlayPreferences.phoneAddress(this)
                 device = adapter.bondedDevices.firstOrNull { it.address.equals(address, true) }
                 val peer = device ?: error("Selected phone is not in Android bonded list; select it in connection setup")
+                knownNames.clear()
+                adapter.bondedDevices.mapNotNull { it.name }.filter { it.isNotBlank() }.forEach { knownNames.add(it) }
+                adapter.name?.takeIf { it.isNotBlank() }?.let { knownNames.add(it) }
+                record("Profile states A2DP=${adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.A2DP)} headset=${adapter.getProfileConnectionState(android.bluetooth.BluetoothProfile.HEADSET)}; states are adapter-wide, not proof for selected peer")
+                collector.prepare(allowAdbApproval)
+                collector.snapshot("before connection tests", since)
+                if (cancelled) return@execute
                 record("Selected peer bond=${peer.bondState}; type=${peer.type}; class=${peer.bluetoothClass?.deviceClass}; bondedCount=${adapter.bondedDevices.size}")
                 val cached = peer.uuids?.map { it.uuid }
                 record("Cached SDP count=${cached?.size}; iAP2Present=${cached?.contains(service)} (cache is not proof of current availability)")
@@ -138,12 +152,16 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
                 record("SDP response within 12 seconds=${sdpReceived.get()}")
                 for (secure in modes) {
                     if (cancelled) break
-                    if (!probe(peer, secure)) break
+                    probe(peer, secure)
+                    Thread.sleep(1000)
                 }
                 record("Diagnostic complete; missing SDP response is inconclusive; socket success does not verify iAP2 authentication")
             } catch (error: Exception) {
                 record("Diagnostic error ${error.javaClass.simpleName}: ${error.message}")
             } finally {
+                collector.snapshot("after connection tests", since)
+                collector.close()
+                record("完整诊断结束。系统日志若显示不可用，本报告不能确定底层拒绝原因。请保存报告。")
                 runOnUiThread { busy = false; start.isEnabled = true }
             }
         }
@@ -151,59 +169,58 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
 
     private fun probe(peer: BluetoothDevice, secure: Boolean): Boolean {
         val mode = if (secure) "secure" else "insecure"
-        val stage = java.util.concurrent.atomic.AtomicReference("socket-create")
+        val stage = java.util.concurrent.atomic.AtomicReference("process-start")
         val outcome = java.util.concurrent.atomic.AtomicReference("no result")
         val finished = java.util.concurrent.CountDownLatch(1)
-        val abandoned = java.util.concurrent.atomic.AtomicBoolean(false)
-        if (!transportBusy.compareAndSet(false, true)) return false
-        val began = android.os.SystemClock.elapsedRealtime()
-        record("RFCOMM $mode stage=socket-create starting; overall deadline=45000ms")
-        Thread({
-            var current: BluetoothSocket? = null
-            try {
-                current = if (secure) peer.createRfcommSocketToServiceRecord(service)
-                    else peer.createInsecureRfcommSocketToServiceRecord(service)
-                socket = current
-                stage.set("socket-connect")
-                if (!cancelled && !abandoned.get()) {
-                    current.connect()
-                    outcome.set("connected; no protocol data sent")
-                } else outcome.set("cancelled before connect")
-            } catch (error: Exception) {
-                outcome.set("failed at ${stage.get()}; ${error.javaClass.simpleName}: ${error.message}")
-            } finally {
-                stage.set("socket-close")
-                runCatching { current?.close() }
-                socket = null
-                transportBusy.set(false)
-                finished.countDown()
-            }
-        }, "bluetooth-diagnostic-$mode").apply { isDaemon = true; start() }
-        var nextProgress = 5000L
-        while (!finished.await(250, TimeUnit.MILLISECONDS)) {
-            val elapsed = android.os.SystemClock.elapsedRealtime() - began
-            if (cancelled || elapsed >= 45000) {
-                abandoned.set(true)
-                record("RFCOMM $mode ${if (cancelled) "cancelled" else "timed out"}; blockedStage=${stage.get()}; elapsedMs=$elapsed; lastResult=${outcome.get()}")
-                closeAsync(socket)
-                record("系统蓝牙调用未返回，已停止后续测试；诊断界面可退出。不能据此判定硬件不支持。")
-                return false
-            }
-            if (elapsed >= nextProgress) {
-                record("RFCOMM $mode waiting; stage=${stage.get()}; elapsedMs=$elapsed")
-                nextProgress += 5000
+        val active = java.util.concurrent.atomic.AtomicBoolean(true)
+        val pid = java.util.concurrent.atomic.AtomicInteger(0)
+        val receiver = object : android.os.ResultReceiver(android.os.Handler(mainLooper)) {
+            override fun onReceiveResult(code: Int, data: Bundle?) {
+                val childPid = data?.getInt("pid") ?: return
+                if (!active.get()) {
+                    if (childPid > 0 && childPid != android.os.Process.myPid()) android.os.Process.killProcess(childPid)
+                    return
+                }
+                pid.set(childPid)
+                probePid = childPid
+                val text = data.getString("text") ?: "unknown"
+                when (code) {
+                    1 -> { stage.set(text); record("RFCOMM $mode stage=$text") }
+                    2 -> { outcome.set(text); finished.countDown() }
+                    3 -> outcome.set(text)
+                }
             }
         }
-        record("RFCOMM $mode ${outcome.get()}; elapsedMs=${android.os.SystemClock.elapsedRealtime() - began}")
-        return true
+        val began = android.os.SystemClock.elapsedRealtime()
+        record("RFCOMM $mode starting in disposable app process; deadline=45000ms")
+        runOnUiThread {
+            runCatching { startService(Intent(this, BluetoothProbeService::class.java)
+                .putExtra("receiver", receiver).putExtra("address", peer.address).putExtra("secure", secure)) }
+                .onFailure { outcome.set("Process start failed: ${it.javaClass.simpleName}"); finished.countDown() }
+        }
+        var nextProgress = 5000L
+        try {
+            while (!finished.await(250, TimeUnit.MILLISECONDS)) {
+                val elapsed = android.os.SystemClock.elapsedRealtime() - began
+                if (cancelled || elapsed >= 45000) {
+                    record("RFCOMM $mode ${if (cancelled) "cancelled" else "timed out"}; blockedStage=${stage.get()}; elapsedMs=$elapsed; lastResult=${outcome.get()}")
+                    return false
+                }
+                if (elapsed >= nextProgress) {
+                    record("RFCOMM $mode waiting; stage=${stage.get()}; elapsedMs=$elapsed")
+                    nextProgress += 5000
+                }
+            }
+            record("RFCOMM $mode result=${outcome.get()}; elapsedMs=${android.os.SystemClock.elapsedRealtime() - began}")
+            return true
+        } finally {
+            active.set(false)
+            val child = pid.get()
+            if (child > 0 && child != android.os.Process.myPid()) android.os.Process.killProcess(child)
+            probePid = 0
+            record("RFCOMM $mode diagnostic process released")
+        }
     }
-
-    private fun closeAsync(current: BluetoothSocket?) {
-        if (current == null) return
-        Thread({ runCatching { current.close() } }, "bluetooth-diagnostic-close")
-            .apply { isDaemon = true; start() }
-    }
-
     private fun category(uuid: UUID): String = when (uuid) {
         service -> "iAP2"
         UUID.fromString("0000110a-0000-1000-8000-00805f9b34fb") -> "A2DP source"
@@ -213,7 +230,9 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
     }
 
     private fun record(message: String) {
-        val safe = DiagnosticRedactor.redact(message.replace('\n', ' ').replace('\r', ' ')) ?: "Diagnostic detail omitted"
+        var filtered = message.replace('\n', ' ').replace('\r', ' ')
+        knownNames.forEach { filtered = filtered.replace(it, "[device]", ignoreCase = true) }
+        val safe = DiagnosticRedactor.redact(filtered) ?: return
         synchronized(report) {
             report.append(java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.ROOT).format(java.util.Date())).append("  ").append(safe).append('\n')
             val text = report.toString()
@@ -224,22 +243,42 @@ class BluetoothDiagnosticActivity : ComponentActivity() {
         }
     }
 
+    private fun saveReport() {
+        if (busy) { record("诊断仍在运行，请结束后保存，避免缺少后半段结果。"); return }
+        worker.execute {
+            runCatching {
+                val text = buildString {
+                    appendLine("DiPlay complete Bluetooth diagnostic; Android ${Build.VERSION.RELEASE}; ${Build.MODEL}")
+                    val names = listOf("bluetooth-diagnostic.log") + SessionLogFile.REPORT_NAMES.toList()
+                    names.forEach { name ->
+                        val file = File(filesDir, "logs/$name")
+                        if (file.isFile) {
+                            appendLine("--- $name ---")
+                            file.useLines { lines -> lines.forEach { line -> DiagnosticRedactor.redact(line)?.let { appendLine(it) } } }
+                        }
+                    }
+                }
+                if (Build.VERSION.SDK_INT >= 29) {
+                    val name = "DiPlay-Bluetooth-${java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date())}.txt"
+                    DiagnosticExportStore.saveToDownloads(contentResolver, name, text)
+                    record("完整报告已保存到 Downloads/DiPlay/$name")
+                } else record("请返回设置使用保存诊断报告选择文件位置。")
+            }.onFailure { record("报告保存失败：${it.javaClass.simpleName}: ${it.message}") }
+        }
+    }
+
     private fun cancel() {
         cancelled = true
-        closeAsync(socket)
+        if (probePid > 0 && probePid != android.os.Process.myPid()) android.os.Process.killProcess(probePid)
         record("Diagnostic cancellation requested")
     }
 
     override fun onDestroy() {
         cancelled = true
-        closeAsync(socket)
+        if (probePid > 0 && probePid != android.os.Process.myPid()) android.os.Process.killProcess(probePid)
         worker.shutdownNow()
         if (registered) unregisterReceiver(receiver)
         super.onDestroy()
     }
 
-    companion object {
-        // Do not start another native operation while a vendor call remains stuck.
-        private val transportBusy = java.util.concurrent.atomic.AtomicBoolean(false)
-    }
 }
